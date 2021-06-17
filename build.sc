@@ -48,8 +48,8 @@ def withDottyCompat(dep: Dep, scalaVersion: String): Dep =
     case _ => dep
   }
 
-val scala2_12Versions = Seq("2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11", "2.12.12", "2.12.13")
-val scala2_13Versions = Seq("2.13.0", "2.13.1", "2.13.2", "2.13.3", "2.13.4", "2.13.5", "2.13.6")
+val scala2_12Versions = Seq("2.12.13")
+val scala2_13Versions = Seq("2.13.6")
 
 val binCrossScalaVersions = Seq(scala2_12Versions.last, scala2_13Versions.last, scala3)
 def isScala2_12_10OrLater(sv: String): Boolean = {
@@ -76,6 +76,7 @@ val (buildVersion, unstable) = scala.util.Try(
 val bspVersion = "2.0.0-M6"
 val fastparseVersion = "2.3.0"
 val scalametaVersion = "4.4.18"
+val scalapyVersion = "0.5.0"
 
 object Deps {
   val acyclic = ivy"com.lihaoyi::acyclic:0.2.0"
@@ -94,12 +95,14 @@ object Deps {
   val mainargs = ivy"com.lihaoyi::mainargs:0.2.0"
   val osLib = ivy"com.lihaoyi::os-lib:0.7.2"
   val pprint = ivy"com.lihaoyi::pprint:0.6.6"
+  val pythonNativeLibs = ivy"ai.kien::python-native-libs:0.0.0+13-f5d7089a-SNAPSHOT"
   val requests = ivy"com.lihaoyi::requests:0.6.5"
   val scalacheck = ivy"org.scalacheck::scalacheck:1.14.0"
   val scalaCollectionCompat = ivy"org.scala-lang.modules::scala-collection-compat:2.4.1"
   def scalaCompiler(scalaVersion: String) = ivy"org.scala-lang:scala-compiler:${scalaVersion}"
   val scalaJava8Compat = ivy"org.scala-lang.modules::scala-java8-compat:0.9.0"
   val scalaparse = ivy"com.lihaoyi::scalaparse:$fastparseVersion"
+  val scalapy = ivy"me.shadaj::scalapy-core:$scalapyVersion"
   def scalaReflect(scalaVersion: String) = ivy"org.scala-lang:scala-reflect:${scalaVersion}"
   val scalaXml = ivy"org.scala-lang.modules::scala-xml:2.0.0-M3"
   val scalazCore = ivy"org.scalaz::scalaz-core:7.2.27"
@@ -395,9 +398,13 @@ object amm extends Cross[MainModule](fullCrossScalaVersions:_*){
       def moduleDeps = Seq(amm.compiler.interface(), ops(), amm.util())
       def crossFullScalaVersion = true
       def dependencyResourceFileName = "amm-interp-api-dependencies.txt"
+      def repositoriesTask = T.task { super.repositoriesTask() ++ Seq(
+        coursier.maven.MavenRepository("https://s01.oss.sonatype.org/content/repositories/snapshots")
+      ) }
       def ivyDeps = Agg(
         Deps.scalaReflect(scalaVersion()),
-        Deps.coursierInterface
+        Deps.coursierInterface,
+        Deps.pythonNativeLibs
       )
       def constantsFile = T {
         val dest = T.dest / "Constants.scala"
