@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - master
+      - scalapy-completion
   pull_request:
     branches:
       - master
+      - scalapy-completion
 jobs:
   test:
     strategy:
