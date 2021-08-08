@@ -1,18 +1,17 @@
 package ammonite.compiler
 
+import scala.collection.compat.immutable.LazyList
+import scala.util.Random
 import scala.tools.nsc.interactive.Global
-import scala.util.Try
-import scala.io.Source
 
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
-import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 trait Completion {
   val global: Global
 
   abstract class Run(
-    tree: => global.Tree,
+    tree: global.Tree,
     evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
@@ -22,10 +21,11 @@ trait Completion {
 }
 
 trait ScalaPyCompletion extends Completion {
-  import global.{Try => _, _}
+  import global._
+  import ScalaPyCompletion._
 
   class Run(
-    tree: => Tree,
+    tree: Tree,
     evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
@@ -46,7 +46,7 @@ trait ScalaPyCompletion extends Completion {
               attrs match {
                 case Nil if !prefixStr.isEmpty =>
                   val matches = py.module("rlcompleter")
-                    .Completer(py"globals()")
+                    .Completer(namespace)
                     .global_matches(prefixStr)
                     .as[Seq[String]]
                     .filter(_.startsWith(prefixStr))
@@ -54,55 +54,42 @@ trait ScalaPyCompletion extends Completion {
                   Some(offset, matches.map((_, None)))
 
                 case _ :: _ =>
-                  val exprStr = attrs.mkString(".") + "."
-                  val text = exprStr + prefixStr
-                  val pattern = s"^${exprStr}(${prefixStr}.*)$$".r
-                  val matches = py.module("rlcompleter")
-                    .Completer(py"globals()")
-                    .attr_matches(text)
-                    .as[Seq[String]]
-                    .map(pattern.findFirstMatchIn(_).map(_.subgroups))
-                    .collect { case Some(s :: Nil) => s }
+                  val exprStr = attrs.mkString(".")
+                  val matches = attrMatches(exprStr, prefixStr)
 
                   Some(offset, matches.map((_, None)))
 
                 case _ => None
               }
 
-            case q"ammonite.$$sess.${TermName(cmd)}.${TermName(v)}" if cmd.startsWith("cmd") =>
-              val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
-              val instance = cmdClass.getField("MODULE$").get(null)
+            case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}"}.${term @ TermName(v)}"
+              if cmd.startsWith("cmd") && isValOrVar(wrapper.tpe.member(term)) =>
+                Some(offset, Seq((prefixStr + root.symbol.accurateKindString, None)))
+                val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
+                val instance = cmdClass.getField("MODULE$").get(null)
 
-              val rootValue = cmdClass
-                .getDeclaredMethod(v)
-                .invoke(instance)
-                .asInstanceOf[py.Dynamic]
+                val rootValue = cmdClass
+                  .getDeclaredMethod(v)
+                  .invoke(instance)
+                  .asInstanceOf[py.Dynamic]
 
-              Try {
-                ScalaPyCompletion.pyAttrMatches(
-                  attrs.foldLeft(rootValue)(_.selectDynamic(_)),
-                  prefixStr
-                ).as[Seq[String]].filter(_.startsWith(prefixStr)).map((_, None))
-              }.toOption.map((offset, _))
+                val matches = attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
+                Some(offset, matches.map((_, None)))
 
-            case q"ammonite.$$sess.${TermName(cmd)}.instance.${TermName(v)}"
-              if cmd.startsWith("cmd") =>
-              val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
-              val instance = cmdClass.getField("MODULE$").get(null)
-              val instanceMethod = cmdClass.getDeclaredMethod("instance")
+            case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}.instance"}.${term @ TermName(v)}"
+              if cmd.startsWith("cmd") && isValOrVar(wrapper.tpe.member(term)) =>
+                val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
+                val instance = cmdClass.getField("MODULE$").get(null)
+                val instanceMethod = cmdClass.getDeclaredMethod("instance")
 
-              val rootValue = evalClassloader
-                .loadClass(s"ammonite.$$sess.${cmd}$$Helper")
-                .getDeclaredMethod(v)
-                .invoke(instanceMethod.invoke(instance))
-                .asInstanceOf[py.Dynamic]
+                val rootValue = evalClassloader
+                  .loadClass(s"ammonite.$$sess.${cmd}$$Helper")
+                  .getDeclaredMethod(v)
+                  .invoke(instanceMethod.invoke(instance))
+                  .asInstanceOf[py.Dynamic]
 
-              Try {
-                ScalaPyCompletion.pyAttrMatches(
-                  attrs.foldLeft(rootValue)(_.selectDynamic(_)),
-                  prefixStr
-                ).as[Seq[String]].filter(_.startsWith(prefixStr)).map((_, None))
-              }.toOption.map((offset, _))
+                val matches = attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
+                Some(offset, matches.map((_, None)))
 
             case _ => None
           }
@@ -111,31 +98,73 @@ trait ScalaPyCompletion extends Completion {
     }
   }
 
-  object SelectChain {
-    def unapply(t: Tree): Option[(Tree, List[String])] = {
-      val r = t match {
-        case q"${SelectChain(q, attrs)}.${TermName(attrN)}" =>
-          Some((q, attrN.toString :: attrs))
-        case _ => Some(t, Nil)
-      }
-      r.collect { case (q, attrs) => (q, attrs.reverse) }
-    }
-  }
+  private lazy val valOrVarSymbolKinds = Set("getter", "setter")
+
+  private def isValOrVar(sym: Symbol) = valOrVarSymbolKinds.contains(sym.accurateKindString)
 
   object SelectDynamicChain {
-    def unapply(t: Tree): Option[(Tree, List[String])] = {
-      val r = t match {
-        case q"${SelectDynamicChain(q, args)}.selectDynamic(${Literal(Constant(argN))})" =>
+    private object Aux {
+      def unapply(t: Tree): Option[(Tree, List[String])] = t match {
+        case q"${Aux(q, args)}.selectDynamic(${Literal(Constant(argN))})" =>
           Some((q, argN.toString :: args))
         case _ => Some(t, Nil)
       }
-      r.collect { case (q, args) => (q, args.reverse) }
+    }
+
+    def unapply(t: Tree): Option[(Tree, List[String])] = t match {
+      case Aux(q, args) => Some(q, args.reverse)
+      case _ => None
     }
   }
 }
 
 object ScalaPyCompletion {
-  CPythonInterpreter.execManyLines(Source.fromResource("scalapy_completion.py").mkString)
+  def namespace = py"globals()"
 
-  val pyAttrMatches = py.Dynamic.global.__scalapy_completion_attr_matches
+  def attrMatches(pyObject: py.Dynamic, attr: String): Seq[String] = {
+    val variableName = randomNewVariableName()
+
+    try {
+      updateVariable(variableName, pyObject)
+      attrMatches(variableName, attr)
+    } finally {
+      if (variableExists(variableName))
+        deleteVariable(variableName)
+    }
+  }
+
+  def attrMatches(expr: String, attr: String): Seq[String] = {
+    val text = s"${expr}.${attr}"
+    val pattern = s"^${expr}\\.(${attr}.*)$$".r
+
+    py.module("rlcompleter")
+      .Completer(namespace)
+      .attr_matches(text)
+      .as[Seq[String]]
+      .map(pattern.findFirstMatchIn(_).map(_.subgroups))
+      .collect { case Some(s :: Nil) => s }
+  }
+
+  def randomVariableName(length: Int = 5): String =
+    "__scalapy" + Random.alphanumeric.take(length).mkString
+
+  def randomNewVariableName(tries: Int = 10): String = {
+    val generated = (1 to tries)
+      .to(LazyList)
+      .map(randomVariableName)
+      .find(!variableExists(_))
+
+    generated match {
+      case Some(v) => v
+      case None =>
+        throw new Exception(s"Could not find a new random variable name in $tries tries")
+    }
+  }
+
+  def variableExists(name: String): Boolean = py"$name in $namespace".as[Boolean]
+
+  def deleteVariable(name: String): Unit = namespace.bracketDelete(name)
+
+  def updateVariable(name: String, newValue: py.Any): Unit =
+    namespace.bracketUpdate(name, newValue)
 }
