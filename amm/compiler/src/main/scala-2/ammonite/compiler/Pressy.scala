@@ -41,6 +41,7 @@ object Pressy {
    * `nsc.interactive.Global` and other data specific to a single completion
    */
   class Run(val pressy: nsc.interactive.Global,
+            evalClassloader: => ClassLoader,
             currentFile: BatchSourceFile,
             dependencyCompleteOpt: Option[String => (Int, Seq[String])],
             allCode: String,
@@ -165,7 +166,7 @@ object Pressy {
 
     def prefixed: (Int, Seq[(String, Option[String])]) = {
       val scalapyCompletion = new ScalaPyCompletion { val global: pressy.type = pressy }
-      val runScalaPyCompletion = new scalapyCompletion.Run(tree, allCode, index)
+      val runScalaPyCompletion = new scalapyCompletion.Run(tree, evalClassloader, allCode, index)
 
       runScalaPyCompletion.prefixed match {
         case Some(result) => result
@@ -332,7 +333,9 @@ object Pressy {
       pressy.askReload(List(currentFile), r)
       r.get.fold(x => x, e => throw e)
 
-      val run = Try(new Run(pressy, currentFile, dependencyCompleteOpt, allCode, index))
+      val run = Try(
+        new Run(pressy, evalClassloader, currentFile, dependencyCompleteOpt, allCode, index)
+      )
 
       val (i, all): (Int, Seq[(String, Option[String])]) = run.map(_.prefixed) match {
         case Success(prefixed) => prefixed

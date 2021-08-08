@@ -2,15 +2,18 @@ package ammonite.compiler
 
 import scala.tools.nsc.interactive.Global
 import scala.util.Try
+import scala.io.Source
 
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
+import me.shadaj.scalapy.interpreter.CPythonInterpreter
 
 trait Completion {
   val global: Global
 
   abstract class Run(
     tree: => global.Tree,
+    evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
   ) {
@@ -23,6 +26,7 @@ trait ScalaPyCompletion extends Completion {
 
   class Run(
     tree: => Tree,
+    evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
   ) {
@@ -65,6 +69,41 @@ trait ScalaPyCompletion extends Completion {
                 case _ => None
               }
 
+            case q"ammonite.$$sess.${TermName(cmd)}.${TermName(v)}" if cmd.startsWith("cmd") =>
+              val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
+              val instance = cmdClass.getField("MODULE$").get(null)
+
+              val rootValue = cmdClass
+                .getDeclaredMethod(v)
+                .invoke(instance)
+                .asInstanceOf[py.Dynamic]
+
+              Try {
+                ScalaPyCompletion.pyAttrMatches(
+                  attrs.foldLeft(rootValue)(_.selectDynamic(_)),
+                  prefixStr
+                ).as[Seq[String]].filter(_.startsWith(prefixStr)).map((_, None))
+              }.toOption.map((offset, _))
+
+            case q"ammonite.$$sess.${TermName(cmd)}.instance.${TermName(v)}"
+              if cmd.startsWith("cmd") =>
+              val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
+              val instance = cmdClass.getField("MODULE$").get(null)
+              val instanceMethod = cmdClass.getDeclaredMethod("instance")
+
+              val rootValue = evalClassloader
+                .loadClass(s"ammonite.$$sess.${cmd}$$Helper")
+                .getDeclaredMethod(v)
+                .invoke(instanceMethod.invoke(instance))
+                .asInstanceOf[py.Dynamic]
+
+              Try {
+                ScalaPyCompletion.pyAttrMatches(
+                  attrs.foldLeft(rootValue)(_.selectDynamic(_)),
+                  prefixStr
+                ).as[Seq[String]].filter(_.startsWith(prefixStr)).map((_, None))
+              }.toOption.map((offset, _))
+
             case _ => None
           }
 
@@ -96,5 +135,7 @@ trait ScalaPyCompletion extends Completion {
 }
 
 object ScalaPyCompletion {
+  CPythonInterpreter.execManyLines(Source.fromResource("scalapy_completion.py").mkString)
 
+  val pyAttrMatches = py.Dynamic.global.__scalapy_completion_attr_matches
 }
