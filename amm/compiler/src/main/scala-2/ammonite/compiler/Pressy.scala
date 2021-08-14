@@ -165,10 +165,9 @@ object Pressy {
     }
 
     def prefixed: (Int, Seq[(String, Option[String])]) = {
-      val scalapyCompletion = new ScalaPyCompletion { val global: pressy.type = pressy }
-      val runScalaPyCompletion = new scalapyCompletion.Run(tree, evalClassloader, allCode, index)
-
-      runScalaPyCompletion.prefixed match {
+      new ScalaPyCompletion {
+        val global: pressy.type = pressy
+      }.complete(tree, evalClassloader, allCode, index) match {
         case Some(result) => result
         case None => tree match {
 

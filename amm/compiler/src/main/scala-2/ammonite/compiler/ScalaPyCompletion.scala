@@ -1,7 +1,9 @@
 package ammonite.compiler
 
 import scala.collection.compat.immutable.LazyList
+import scala.reflect.runtime.{universe => ru}
 import scala.util.Random
+import scala.tools.reflect.ToolBox
 import scala.tools.nsc.interactive.Global
 
 import me.shadaj.scalapy.py
@@ -10,27 +12,27 @@ import me.shadaj.scalapy.py.PyQuote
 trait Completion {
   val global: Global
 
-  abstract class Run(
+  def complete(
     tree: global.Tree,
     evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
-  ) {
-    def prefixed: Option[(Int, Seq[(String, Option[String])])]
-  }
+  ): Option[(Int, Seq[(String, Option[String])])]
 }
 
 trait ScalaPyCompletion extends Completion {
   import global._
   import ScalaPyCompletion._
 
-  class Run(
+  def complete(
     tree: Tree,
     evalClassloader: => ClassLoader,
     allCode: String,
     index: Int
-  ) {
-    def prefixed: Option[(Int, Seq[(String, Option[String])])] = tree match {
+  ): Option[(Int, Seq[(String, Option[String])])] = {
+    lazy val toolbox = ru.runtimeMirror(evalClassloader).mkToolBox()
+
+    tree match {
       case t @ q"""${expr @ SelectDynamicChain(root, attrs)}
         .selectDynamic(${Literal(Constant(prefix))})
         """ if global.ask(() => t.tpe <:< global.typeOf[py.Any]) =>
@@ -77,7 +79,11 @@ trait ScalaPyCompletion extends Completion {
                 Some(offset, matches.map((_, None)))
 
             case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}.instance"}.${term @ TermName(v)}"
-              if cmd.startsWith("cmd") && isValOrVar(wrapper.tpe.member(term)) =>
+              if (
+                cmd.startsWith("cmd") &&
+                  isCodeClassWrapperInstance(wrapper, cmd) &&
+                  isValOrVar(wrapper.tpe.member(term))
+              ) =>
                 val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
                 val instance = cmdClass.getField("MODULE$").get(null)
                 val instanceMethod = cmdClass.getDeclaredMethod("instance")
@@ -91,16 +97,51 @@ trait ScalaPyCompletion extends Completion {
                 val matches = attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
                 Some(offset, matches.map((_, None)))
 
-            case _ => None
+            case SelectChain(
+              q"ammonite", List((_, _, "$sess"), (_, _, cmd), rest @ _*)
+            ) if cmd.startsWith("cmd") =>
+              val (classBased, remains) = rest match {
+                case (inst, _, "instance") :: remains if isCodeClassWrapperInstance(inst, cmd) =>
+                  (true, remains)
+                case remains => (false, remains)
+              }
+
+              val members = remains.map(_._3)
+
+              val allAtributes =
+                remains
+                  .to(LazyList)
+                  .map { case (_, qual, name) => qual.tpe.member(TermName(name)) }
+                  .forall(isAttribute)
+
+              if (allAtributes) {
+                val rootValue =
+                  toolbox
+                    .eval(treeReconstruction.selects(members, cmd, classBased))
+                    .asInstanceOf[py.Dynamic]
+                val matches =
+                  attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
+                Some(offset, matches.map((_, None)))
+              } else Some(offset, Nil)
+
+            case _ => Some(offset, Nil)
           }
 
       case _ => None
     }
   }
 
-  private lazy val valOrVarSymbolKinds = Set("getter", "setter")
+  lazy val treeReconstruction = new TreeReconstruction { val universe: ru.type = ru }
 
-  private def isValOrVar(sym: Symbol) = valOrVarSymbolKinds.contains(sym.accurateKindString)
+  private def checkSymbolKind(kinds: Set[String])(sym: Symbol) =
+    kinds.contains(sym.accurateKindString)
+
+  private val isValOrVar = checkSymbolKind(Set("getter", "setter")) _
+
+  private val isAttribute = checkSymbolKind(Set("module", "getter", "setter")) _
+
+  private def isCodeClassWrapperInstance(tree: global.Tree, cmd: String) =
+    tree.tpe.baseClasses.exists(_.fullName == s"ammonite.$$sess.$cmd.Helper")
 
   object SelectDynamicChain {
     private object Aux {
@@ -113,6 +154,21 @@ trait ScalaPyCompletion extends Completion {
 
     def unapply(t: Tree): Option[(Tree, List[String])] = t match {
       case Aux(q, args) => Some(q, args.reverse)
+      case _ => None
+    }
+  }
+
+  object SelectChain {
+    private object Aux {
+      def unapply(t: Tree): Option[(Tree, List[(Tree, Tree, String)])] = t match {
+        case q"${qualN @ Aux(q, acc)}.${TermName(nameN)}" =>
+          Some(q, (t, qualN, nameN.toString) :: acc)
+        case _ => Some(t, Nil)
+      }
+    }
+
+    def unapply(t: Tree): Option[(Tree, List[(Tree, Tree, String)])] = t match {
+      case Aux(q, selects) => Some(q, selects.reverse)
       case _ => None
     }
   }
@@ -167,4 +223,16 @@ object ScalaPyCompletion {
 
   def updateVariable(name: String, newValue: py.Any): Unit =
     namespace.bracketUpdate(name, newValue)
+
+  trait TreeReconstruction {
+    val universe: scala.reflect.api.Universe
+    import universe._
+
+    def selects(members: Seq[String], cmd: String, classBased: Boolean = false): Tree = {
+      val base = q"ammonite.$$sess.${TermName(cmd)}"
+      val wrapper = if (classBased) q"${base}.instance" else base
+
+      members.foldLeft(wrapper) { case (qual, name) => q"${qual}.${TermName(name)}" }
+    }
+  }
 }
