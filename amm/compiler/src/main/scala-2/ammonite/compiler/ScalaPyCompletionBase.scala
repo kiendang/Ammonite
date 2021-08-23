@@ -20,9 +20,9 @@ trait Completion {
   ): Option[(Int, Seq[(String, Option[String])])]
 }
 
-trait ScalaPyCompletion extends Completion {
+trait ScalaPyCompletionBase extends Completion {
   import global._
-  import ScalaPyCompletion._
+  import ScalaPyCompletionBase._
 
   def complete(
     tree: Tree,
@@ -174,7 +174,7 @@ trait ScalaPyCompletion extends Completion {
   }
 }
 
-object ScalaPyCompletion {
+object ScalaPyCompletionBase {
   def namespace = py"globals()"
 
   def attrMatches(pyObject: py.Dynamic, attr: String): Seq[String] = {
