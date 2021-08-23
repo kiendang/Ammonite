@@ -4,21 +4,9 @@ import scala.collection.compat.immutable.LazyList
 import scala.reflect.runtime.{universe => ru}
 import scala.util.Random
 import scala.tools.reflect.ToolBox
-import scala.tools.nsc.interactive.Global
 
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
-
-trait Completion {
-  val global: Global
-
-  def complete(
-    tree: global.Tree,
-    evalClassloader: => ClassLoader,
-    allCode: String,
-    index: Int
-  ): Option[(Int, Seq[(String, Option[String])])]
-}
 
 trait ScalaPyCompletionBase extends Completion {
   import global._
