@@ -37,7 +37,7 @@ trait BasicCompletionBase extends Completion {
 
               attrs match {
                 case Nil if !prefixStr.isEmpty =>
-                  val matches = py.module("rlcompleter")
+                  val matches = rlcompleter
                     .Completer(namespace)
                     .global_matches(prefixStr)
                     .as[Seq[String]]
@@ -137,7 +137,7 @@ trait BasicCompletionBase extends Completion {
     private object Aux {
       def unapply(t: Tree): Option[(Tree, List[String])] = t match {
         case q"${Aux(q, args)}.selectDynamic(${Literal(Constant(argN))})" =>
-          Some((q, argN.toString :: args))
+          Some(q, argN.toString :: args)
         case _ => Some(t, Nil)
       }
     }
@@ -167,6 +167,8 @@ trait BasicCompletionBase extends Completion {
 object BasicCompletionBase {
   def namespace = py"globals()"
 
+  val rlcompleter = py.module("rlcompleter")
+
   def attrMatches(pyObject: py.Dynamic, attr: String): Seq[String] = {
     val variableName = randomNewVariableName()
 
@@ -183,7 +185,7 @@ object BasicCompletionBase {
     val text = s"${expr}.${attr}"
     val pattern = s"^${expr}\\.(${attr}.*)$$".r
 
-    py.module("rlcompleter")
+    rlcompleter
       .Completer(namespace)
       .attr_matches(text)
       .as[Seq[String]]
