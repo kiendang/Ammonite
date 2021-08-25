@@ -165,10 +165,10 @@ object Pressy {
     }
 
     def prefixed: (Int, Seq[(String, Option[String])]) = {
-      new ScalaPyJediCompletion {
+      new scalapy.JediCompletion {
         val global: pressy.type = pressy
       }.complete(tree, evalClassloader, allCode, index).orElse {
-        new ScalaPyCompletion {
+        new scalapy.BasicCompletion {
           val global: pressy.type = pressy
         }.complete(tree, evalClassloader, allCode, index)
       } match {

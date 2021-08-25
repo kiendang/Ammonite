@@ -1,14 +1,16 @@
-package ammonite.compiler
+package ammonite.compiler.scalapy
+
+import ammonite.compiler.Completion
 
 import scala.tools.nsc.interactive.Global
+import scala.util.Try
 
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
-import scala.util.Try
 
-trait ScalaPyJediCompletion extends Completion {
+trait JediCompletion extends Completion {
   import global._
-  import ScalaPyJediCompletion._
+  import JediCompletion._
 
   def complete(
     tree: global.Tree,
@@ -20,6 +22,6 @@ trait ScalaPyJediCompletion extends Completion {
   }
 }
 
-object ScalaPyJediCompletion {
+object JediCompletion {
   val jedi = Try(py.module("jedi"))
 }

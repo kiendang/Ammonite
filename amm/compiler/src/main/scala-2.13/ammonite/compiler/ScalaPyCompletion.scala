@@ -1,3 +1,0 @@
-package ammonite.compiler
-
-trait ScalaPyCompletion extends ScalaPyCompletionBase

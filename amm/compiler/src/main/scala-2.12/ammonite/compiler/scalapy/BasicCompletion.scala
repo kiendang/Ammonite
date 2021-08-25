@@ -1,6 +1,6 @@
-package ammonite.compiler
+package ammonite.compiler.scalapy
 
-trait ScalaPyCompletion extends ScalaPyCompletionBase {
+trait BasicCompletion extends BasicCompletionBase {
   override def complete(
     tree: global.Tree,
     evalClassloader: => ClassLoader,

@@ -1,4 +1,6 @@
-package ammonite.compiler
+package ammonite.compiler.scalapy
+
+import ammonite.compiler.Completion
 
 import scala.collection.compat.immutable.LazyList
 import scala.reflect.runtime.{universe => ru}
@@ -8,9 +10,9 @@ import scala.tools.reflect.ToolBox
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
 
-trait ScalaPyCompletionBase extends Completion {
+trait BasicCompletionBase extends Completion {
   import global._
-  import ScalaPyCompletionBase._
+  import BasicCompletionBase._
 
   def complete(
     tree: Tree,
@@ -162,7 +164,7 @@ trait ScalaPyCompletionBase extends Completion {
   }
 }
 
-object ScalaPyCompletionBase {
+object BasicCompletionBase {
   def namespace = py"globals()"
 
   def attrMatches(pyObject: py.Dynamic, attr: String): Seq[String] = {
