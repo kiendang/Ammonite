@@ -53,6 +53,10 @@ trait JediCompletion extends Completion {
           Some(q, ApplyDynamic(method.toString) :: ds)
         case q"${Aux(q, ds)}.applyDynamicNamed(${Literal(Constant(method))})($_)" =>
           Some(q, ApplyDynamicNamed(method.toString) :: ds)
+        case q"${Aux(q, ds)}.apply()" =>
+          Some(q, Call :: ds)
+        case q"${Aux(q, ds)}.apply($_)" =>
+          Some(q, Call :: ds)
         case q"${Aux(q, ds)}.bracketAccess($_)" =>
           Some(q, BracketAccess :: ds)
         case _ => Some(t, Nil)
@@ -69,8 +73,8 @@ trait JediCompletion extends Completion {
 object JediCompletion {
   val jedi = Try(py.module("jedi"))
 
-  def getCompletions(jedi: py.Module)(code: String): Seq[String] =
-    py"list(map($getName, ${jedi.Interpreter(code, py"[$namespace]").complete()}))".as[Seq[String]]
+  def getCompletions(jedi: py.Module)(code: String): List[String] =
+    py"list(map($getName, ${jedi.Interpreter(code, py"[$namespace]").complete()}))".as[List[String]]
 
   private val getName = py.module("operator").attrgetter("name")
 
@@ -80,15 +84,29 @@ object JediCompletion {
   case class SelectDynamic(term: String) extends Dynamic
   case class ApplyDynamic(method: String) extends Dynamic
   case class ApplyDynamicNamed(method: String) extends Dynamic
+  case object Call extends Dynamic
   case object BracketAccess extends Dynamic
 
   def convertToPython(dynamic: Dynamic): String = dynamic match {
     case SelectDynamic(term) => term
     case ApplyDynamic(method) => method + "()"
     case ApplyDynamicNamed(method) => method + "()"
+    case Call => "()"
     case BracketAccess => "__getitem__()"
   }
 
-  def convertToPython(dynamics: Seq[Dynamic]): String =
-    dynamics.map(convertToPython).mkString(".")
+  def convertToPython(dynamics: List[Dynamic]): String = dynamics match {
+    case Nil => ""
+    case head :: tails => tails.foldLeft(convertToPython(head)) {
+      case (acc, Call) => acc + convertToPython(Call)
+      case (acc, dynamic) => acc + "." + convertToPython(dynamic)
+    }
+  }
+
+  def convertToPython(variable: String, dynamics: List[Dynamic]): String = dynamics match {
+    case Nil => variable
+    case Call :: _ => variable + convertToPython(dynamics)
+    case _ :: _ if variable.isEmpty => convertToPython(dynamics)
+    case _ :: _ => variable + "." + convertToPython(dynamics)
+  }
 }
