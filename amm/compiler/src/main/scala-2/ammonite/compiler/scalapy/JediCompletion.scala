@@ -8,7 +8,7 @@ import scala.util.Try
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
 
-trait JediCompletion extends Completion {
+trait JediCompletion extends Completion { self =>
   import global.{ApplyDynamic => _, _}
   import JediCompletion._
 
@@ -18,6 +18,8 @@ trait JediCompletion extends Completion {
     allCode: String,
     index: Int
   ): Option[(Int, Seq[(String, Option[String])])] = jedi.toOption.flatMap { jedi =>
+    object PressyUtils extends utils.PressyUtils { val global: self.global.type = self.global }
+
     tree match {
       case t @ q"""${expr @ DynamicChain(root, dynamics)}
         .selectDynamic(${Literal(Constant(prefix))})
@@ -32,8 +34,28 @@ trait JediCompletion extends Completion {
             case _ if global.ask(() => root.tpe =:= global.typeOf[py.Dynamic.global.type]) =>
               val exprStr = convertToPython(dynamics)
               val code = if (exprStr.isEmpty) prefixStr else exprStr + "." + prefixStr
-              val completions = getCompletions(jedi)(code)
+              val completions = getCompletions(code)(jedi)
               Some(offset, completions.map((_, None)))
+
+            case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}"}.${term @ TermName(v)}"
+              if cmd.startsWith("cmd") && PressyUtils.isValOrVar(wrapper.tpe.member(term)) =>
+                val rootValue = utils.getDeclaredValueDefaultWrapper(cmd, v, evalClassloader)
+                  .asInstanceOf[py.Dynamic]
+
+                val completions = getCompletions(rootValue, dynamics, prefixStr)(jedi)
+                Some(offset, completions.map((_, None)))
+
+            case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}.instance"}.${term @ TermName(v)}"
+              if (
+                cmd.startsWith("cmd") &&
+                  PressyUtils.isCodeClassWrapperInstance(wrapper, cmd) &&
+                  PressyUtils.isValOrVar(wrapper.tpe.member(term))
+              ) =>
+                val rootValue = utils.getDeclaredValueClassWrapper(cmd, v, evalClassloader)
+                  .asInstanceOf[py.Dynamic]
+
+                val completions = getCompletions(rootValue, dynamics, prefixStr)(jedi)
+                Some(offset, completions.map((_, None)))
 
             case _ => None
           }
@@ -73,12 +95,32 @@ trait JediCompletion extends Completion {
 object JediCompletion {
   val jedi = Try(py.module("jedi"))
 
-  def getCompletions(jedi: py.Module)(code: String): List[String] =
-    py"list(map($getName, ${jedi.Interpreter(code, py"[$namespace]").complete()}))".as[List[String]]
+  def namespace = py"globals()"
+
+  def getCompletions(code: String, namespace: py.Any)(jedi: py.Module): List[String] =
+    py"list(map($getName, ${jedi.Interpreter(code, namespace).complete()}))".as[List[String]]
+
+  def getCompletions(code: String)(jedi: py.Module): List[String] =
+    getCompletions(code, py"[$namespace]")(jedi)
+
+  def getCompletions(
+    variable: py.Any,
+    dynamics: List[Dynamic],
+    prefixStr: String,
+  )(jedi: py.Module): List[String] = {
+    val variableName = PythonVariable.newRandomName()
+    val ns = py"[{ $variableName: $variable }, $namespace]"
+    val exprStr = convertToPython(variableName, dynamics)
+    val code = if (exprStr.isEmpty) prefixStr else exprStr + "." + prefixStr
+
+    getCompletions(code, ns)(jedi)
+  }
 
   private val getName = py.module("operator").attrgetter("name")
 
-  def namespace = py"globals()"
+  object PythonVariable extends utils.PythonVariable {
+    def namespace = JediCompletion.namespace
+  }
 
   sealed trait Dynamic
   case class SelectDynamic(term: String) extends Dynamic

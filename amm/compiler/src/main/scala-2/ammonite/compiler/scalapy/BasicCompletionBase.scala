@@ -4,13 +4,12 @@ import ammonite.compiler.Completion
 
 import scala.collection.compat.immutable.LazyList
 import scala.reflect.runtime.{universe => ru}
-import scala.util.Random
 import scala.tools.reflect.ToolBox
 
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
 
-trait BasicCompletionBase extends Completion {
+trait BasicCompletionBase extends Completion { self =>
   import global._
   import BasicCompletionBase._
 
@@ -21,6 +20,8 @@ trait BasicCompletionBase extends Completion {
     index: Int
   ): Option[(Int, Seq[(String, Option[String])])] = {
     lazy val toolbox = ru.runtimeMirror(evalClassloader).mkToolBox()
+
+    object PressyUtils extends utils.PressyUtils { val global: self.global.type = self.global }
 
     tree match {
       case t @ q"""${expr @ SelectDynamicChain(root, attrs)}
@@ -55,14 +56,8 @@ trait BasicCompletionBase extends Completion {
               }
 
             case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}"}.${term @ TermName(v)}"
-              if cmd.startsWith("cmd") && isValOrVar(wrapper.tpe.member(term)) =>
-                Some(offset, Seq((prefixStr + root.symbol.accurateKindString, None)))
-                val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
-                val instance = cmdClass.getField("MODULE$").get(null)
-
-                val rootValue = cmdClass
-                  .getDeclaredMethod(v)
-                  .invoke(instance)
+              if cmd.startsWith("cmd") && PressyUtils.isValOrVar(wrapper.tpe.member(term)) =>
+                val rootValue = utils.getDeclaredValueDefaultWrapper(cmd, v, evalClassloader)
                   .asInstanceOf[py.Dynamic]
 
                 val matches = attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
@@ -71,17 +66,10 @@ trait BasicCompletionBase extends Completion {
             case q"${wrapper @ q"ammonite.$$sess.${TermName(cmd)}.instance"}.${term @ TermName(v)}"
               if (
                 cmd.startsWith("cmd") &&
-                  isCodeClassWrapperInstance(wrapper, cmd) &&
-                  isValOrVar(wrapper.tpe.member(term))
+                  PressyUtils.isCodeClassWrapperInstance(wrapper, cmd) &&
+                  PressyUtils.isValOrVar(wrapper.tpe.member(term))
               ) =>
-                val cmdClass = evalClassloader.loadClass(s"ammonite.$$sess.${cmd}$$")
-                val instance = cmdClass.getField("MODULE$").get(null)
-                val instanceMethod = cmdClass.getDeclaredMethod("instance")
-
-                val rootValue = evalClassloader
-                  .loadClass(s"ammonite.$$sess.${cmd}$$Helper")
-                  .getDeclaredMethod(v)
-                  .invoke(instanceMethod.invoke(instance))
+                val rootValue = utils.getDeclaredValueClassWrapper(cmd, v, evalClassloader)
                   .asInstanceOf[py.Dynamic]
 
                 val matches = attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
@@ -91,8 +79,8 @@ trait BasicCompletionBase extends Completion {
               q"ammonite", List((_, _, "$sess"), (_, _, cmd), rest @ _*)
             ) if cmd.startsWith("cmd") =>
               val (classBased, remains) = rest match {
-                case (inst, _, "instance") :: remains if isCodeClassWrapperInstance(inst, cmd) =>
-                  (true, remains)
+                case (inst, _, "instance") :: remains
+                  if PressyUtils.isCodeClassWrapperInstance(inst, cmd) => (true, remains)
                 case remains => (false, remains)
               }
 
@@ -102,7 +90,7 @@ trait BasicCompletionBase extends Completion {
                 remains
                   .to(LazyList)
                   .map { case (_, qual, name) => qual.tpe.member(TermName(name)) }
-                  .forall(isAttribute)
+                  .forall(PressyUtils.isAttribute)
 
               if (allAtributes) {
                 val rootValue =
@@ -122,16 +110,6 @@ trait BasicCompletionBase extends Completion {
   }
 
   lazy val treeReconstruction = new TreeReconstruction { val universe: ru.type = ru }
-
-  private def checkSymbolKind(kinds: Set[String])(sym: Symbol) =
-    kinds.contains(sym.accurateKindString)
-
-  private val isValOrVar = checkSymbolKind(Set("getter", "setter")) _
-
-  private val isAttribute = checkSymbolKind(Set("module", "getter", "setter")) _
-
-  private def isCodeClassWrapperInstance(tree: global.Tree, cmd: String) =
-    tree.tpe.baseClasses.exists(_.fullName == s"ammonite.$$sess.$cmd.Helper")
 
   object SelectDynamicChain {
     private object Aux {
@@ -170,14 +148,14 @@ object BasicCompletionBase {
   val rlcompleter = py.module("rlcompleter")
 
   def attrMatches(pyObject: py.Dynamic, attr: String): Seq[String] = {
-    val variableName = randomNewVariableName()
+    val variableName = PythonVariable.newRandomName()
 
     try {
-      updateVariable(variableName, pyObject)
+      PythonVariable.update(variableName, pyObject)
       attrMatches(variableName, attr)
     } finally {
-      if (variableExists(variableName))
-        deleteVariable(variableName)
+      if (PythonVariable.exists(variableName))
+        PythonVariable.delete(variableName)
     }
   }
 
@@ -193,28 +171,9 @@ object BasicCompletionBase {
       .collect { case Some(s :: Nil) => s }
   }
 
-  def randomVariableName(length: Int = 5): String =
-    "__scalapy" + Random.alphanumeric.take(length).mkString
-
-  def randomNewVariableName(tries: Int = 10): String = {
-    val generated = (1 to tries)
-      .to(LazyList)
-      .map(randomVariableName)
-      .find(!variableExists(_))
-
-    generated match {
-      case Some(v) => v
-      case None =>
-        throw new Exception(s"Could not find a new random variable name in $tries tries")
-    }
+  object PythonVariable extends utils.PythonVariable {
+    def namespace = BasicCompletionBase.namespace
   }
-
-  def variableExists(name: String): Boolean = py"$name in $namespace".as[Boolean]
-
-  def deleteVariable(name: String): Unit = namespace.bracketDelete(name)
-
-  def updateVariable(name: String, newValue: py.Any): Unit =
-    namespace.bracketUpdate(name, newValue)
 
   trait TreeReconstruction {
     val universe: scala.reflect.api.Universe
