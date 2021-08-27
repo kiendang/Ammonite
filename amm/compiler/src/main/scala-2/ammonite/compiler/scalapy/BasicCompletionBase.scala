@@ -19,9 +19,9 @@ trait BasicCompletionBase extends Completion { self =>
     allCode: String,
     index: Int
   ): Option[(Int, Seq[(String, Option[String])])] = {
+    object PressyUtils extends utils.WithPressy { val global: self.global.type = self.global }
+    object SelectChain extends utils.SelectChain { val global: self.global.type = self.global }
     lazy val toolbox = ru.runtimeMirror(evalClassloader).mkToolBox()
-
-    object PressyUtils extends utils.PressyUtils { val global: self.global.type = self.global }
 
     tree match {
       case t @ q"""${expr @ SelectDynamicChain(root, attrs)}
@@ -92,11 +92,17 @@ trait BasicCompletionBase extends Completion { self =>
                   .map { case (_, qual, name) => qual.tpe.member(TermName(name)) }
                   .forall(PressyUtils.isAttribute)
 
+              val names =
+                if (classBased)
+                  Seq("$sess", cmd, "instance") ++ members
+                else Seq("$sess", cmd) ++ members
+
               if (allAtributes) {
                 val rootValue =
                   toolbox
-                    .eval(treeReconstruction.selects(members, cmd, classBased))
+                    .eval(utils.SelectChain.RuntimeFactory.create("ammonite", names))
                     .asInstanceOf[py.Dynamic]
+
                 val matches =
                   attrMatches(attrs.foldLeft(rootValue)(_.selectDynamic(_)), prefixStr)
                 Some(offset, matches.map((_, None)))
@@ -109,8 +115,6 @@ trait BasicCompletionBase extends Completion { self =>
     }
   }
 
-  lazy val treeReconstruction = new TreeReconstruction { val universe: ru.type = ru }
-
   object SelectDynamicChain {
     private object Aux {
       def unapply(t: Tree): Option[(Tree, List[String])] = t match {
@@ -122,21 +126,6 @@ trait BasicCompletionBase extends Completion { self =>
 
     def unapply(t: Tree): Option[(Tree, List[String])] = t match {
       case Aux(q, args) => Some(q, args.reverse)
-      case _ => None
-    }
-  }
-
-  object SelectChain {
-    private object Aux {
-      def unapply(t: Tree): Option[(Tree, List[(Tree, Tree, String)])] = t match {
-        case q"${qualN @ Aux(q, acc)}.${TermName(nameN)}" =>
-          Some(q, (t, qualN, nameN.toString) :: acc)
-        case _ => Some(t, Nil)
-      }
-    }
-
-    def unapply(t: Tree): Option[(Tree, List[(Tree, Tree, String)])] = t match {
-      case Aux(q, selects) => Some(q, selects.reverse)
       case _ => None
     }
   }
@@ -173,17 +162,5 @@ object BasicCompletionBase {
 
   object PythonVariable extends utils.PythonVariable {
     def namespace = BasicCompletionBase.namespace
-  }
-
-  trait TreeReconstruction {
-    val universe: scala.reflect.api.Universe
-    import universe._
-
-    def selects(members: Seq[String], cmd: String, classBased: Boolean = false): Tree = {
-      val base = q"ammonite.$$sess.${TermName(cmd)}"
-      val wrapper = if (classBased) q"${base}.instance" else base
-
-      members.foldLeft(wrapper) { case (qual, name) => q"${qual}.${TermName(name)}" }
-    }
   }
 }

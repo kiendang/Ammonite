@@ -2,7 +2,9 @@ package ammonite.compiler.scalapy
 
 import ammonite.compiler.Completion
 
-import scala.tools.nsc.interactive.Global
+import scala.collection.compat.immutable.LazyList
+import scala.reflect.runtime.{universe => ru}
+import scala.tools.reflect.ToolBox
 import scala.util.Try
 
 import me.shadaj.scalapy.py
@@ -18,7 +20,9 @@ trait JediCompletion extends Completion { self =>
     allCode: String,
     index: Int
   ): Option[(Int, Seq[(String, Option[String])])] = jedi.toOption.flatMap { jedi =>
-    object PressyUtils extends utils.PressyUtils { val global: self.global.type = self.global }
+    object PressyUtils extends utils.WithPressy { val global: self.global.type = self.global }
+    object SelectChain extends utils.SelectChain { val global: self.global.type = self.global }
+    lazy val toolbox = ru.runtimeMirror(evalClassloader).mkToolBox()
 
     tree match {
       case t @ q"""${expr @ DynamicChain(root, dynamics)}
@@ -57,6 +61,38 @@ trait JediCompletion extends Completion { self =>
                 val completions = getCompletions(rootValue, dynamics, prefixStr)(jedi)
                 Some(offset, completions.map((_, None)))
 
+            case SelectChain(
+              q"ammonite", List((_, _, "$sess"), (_, _, cmd), rest @ _*)
+            ) if cmd.startsWith("cmd") =>
+              val (classBased, remains) = rest match {
+                case (inst, _, "instance") :: remains
+                  if PressyUtils.isCodeClassWrapperInstance(inst, cmd) => (true, remains)
+                case remains => (false, remains)
+              }
+
+              val members = remains.map(_._3)
+
+              val allAtributes =
+                remains
+                  .to(LazyList)
+                  .map { case (_, qual, name) => qual.tpe.member(TermName(name)) }
+                  .forall(PressyUtils.isAttribute)
+
+              val names =
+                if (classBased)
+                  Seq("$sess", cmd, "instance") ++ members
+                else Seq("$sess", cmd) ++ members
+
+              if (allAtributes) {
+                val rootValue =
+                  toolbox
+                    .eval(utils.SelectChain.RuntimeFactory.create("ammonite", names))
+                    .asInstanceOf[py.Dynamic]
+
+                val completions = getCompletions(rootValue, dynamics, prefixStr)(jedi)
+                Some(offset, completions.map((_, None)))
+              } else Some(offset, Nil)
+
             case _ => None
           }
 
@@ -66,7 +102,7 @@ trait JediCompletion extends Completion { self =>
 
   object DynamicChain {
     private object Aux {
-      def unapply(t: Tree): Option[(Tree, List[Dynamic])] = t match {
+      def unapply(t: Tree): Option[(Tree, List[PythonDynamic])] = t match {
         case q"${Aux(q, ds)}.selectDynamic(${Literal(Constant(term))})" =>
           Some(q, SelectDynamic(term.toString) :: ds)
         case q"${Aux(q, ds)}.applyDynamic(${Literal(Constant(method))})()" =>
@@ -85,7 +121,7 @@ trait JediCompletion extends Completion { self =>
       }
     }
 
-    def unapply(t: Tree): Option[(Tree, List[Dynamic])] = t match {
+    def unapply(t: Tree): Option[(Tree, List[PythonDynamic])] = t match {
       case Aux(t, ds) => Some(t, ds.reverse)
       case _ => None
     }
@@ -105,7 +141,7 @@ object JediCompletion {
 
   def getCompletions(
     variable: py.Any,
-    dynamics: List[Dynamic],
+    dynamics: List[PythonDynamic],
     prefixStr: String,
   )(jedi: py.Module): List[String] = {
     val variableName = PythonVariable.newRandomName()
@@ -118,18 +154,15 @@ object JediCompletion {
 
   private val getName = py.module("operator").attrgetter("name")
 
-  object PythonVariable extends utils.PythonVariable {
-    def namespace = JediCompletion.namespace
-  }
+  sealed trait PythonDynamic
 
-  sealed trait Dynamic
-  case class SelectDynamic(term: String) extends Dynamic
-  case class ApplyDynamic(method: String) extends Dynamic
-  case class ApplyDynamicNamed(method: String) extends Dynamic
-  case object Call extends Dynamic
-  case object BracketAccess extends Dynamic
+  case class SelectDynamic(term: String) extends PythonDynamic
+  case class ApplyDynamic(method: String) extends PythonDynamic
+  case class ApplyDynamicNamed(method: String) extends PythonDynamic
+  case object Call extends PythonDynamic
+  case object BracketAccess extends PythonDynamic
 
-  def convertToPython(dynamic: Dynamic): String = dynamic match {
+  def convertToPython(dynamic: PythonDynamic): String = dynamic match {
     case SelectDynamic(term) => term
     case ApplyDynamic(method) => method + "()"
     case ApplyDynamicNamed(method) => method + "()"
@@ -137,7 +170,7 @@ object JediCompletion {
     case BracketAccess => "__getitem__()"
   }
 
-  def convertToPython(dynamics: List[Dynamic]): String = dynamics match {
+  def convertToPython(dynamics: List[PythonDynamic]): String = dynamics match {
     case Nil => ""
     case head :: tails => tails.foldLeft(convertToPython(head)) {
       case (acc, Call) => acc + convertToPython(Call)
@@ -145,10 +178,14 @@ object JediCompletion {
     }
   }
 
-  def convertToPython(variable: String, dynamics: List[Dynamic]): String = dynamics match {
+  def convertToPython(variable: String, dynamics: List[PythonDynamic]): String = dynamics match {
     case Nil => variable
     case Call :: _ => variable + convertToPython(dynamics)
     case _ :: _ if variable.isEmpty => convertToPython(dynamics)
     case _ :: _ => variable + "." + convertToPython(dynamics)
+  }
+
+  object PythonVariable extends utils.PythonVariable {
+    def namespace = JediCompletion.namespace
   }
 }

@@ -8,9 +8,9 @@ import scala.util.Random
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
 
-trait PressyUtils {
+trait WithPressy {
   val global: Global
-  import global._
+  import global.{ApplyDynamic => _, _}
 
   def checkSymbolKind(kinds: Set[String])(sym: Symbol) =
     kinds.contains(sym.accurateKindString)
