@@ -105,17 +105,13 @@ trait JediCompletionBase extends Completion { self =>
       def unapply(t: Tree): Option[(Tree, List[PythonDynamic])] = t match {
         case q"${Aux(q, ds)}.selectDynamic(${Literal(Constant(term))})" =>
           Some(q, SelectDynamic(term.toString) :: ds)
-        case q"${Aux(q, ds)}.applyDynamic(${Literal(Constant(method))})()" =>
+        case q"${Aux(q, ds)}.applyDynamic(${Literal(Constant(method))})(..$_)" =>
           Some(q, ApplyDynamic(method.toString) :: ds)
-        case q"${Aux(q, ds)}.applyDynamic(${Literal(Constant(method))})($_)" =>
-          Some(q, ApplyDynamic(method.toString) :: ds)
-        case q"${Aux(q, ds)}.applyDynamicNamed(${Literal(Constant(method))})($_)" =>
+        case q"${Aux(q, ds)}.applyDynamicNamed(${Literal(Constant(method))})(..$_)" =>
           Some(q, ApplyDynamicNamed(method.toString) :: ds)
-        case q"${Aux(q, ds)}.apply()" =>
+        case q"${Aux(q, ds)}.apply(..$_)" =>
           Some(q, Call :: ds)
-        case q"${Aux(q, ds)}.apply($_)" =>
-          Some(q, Call :: ds)
-        case q"${Aux(q, ds)}.bracketAccess($_)" =>
+        case q"${Aux(q, ds)}.bracketAccess(..$_)" =>
           Some(q, BracketAccess :: ds)
         case _ => Some(t, Nil)
       }
