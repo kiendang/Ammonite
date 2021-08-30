@@ -42,7 +42,7 @@ object ScalaPyCompletionTests extends TestSuite{
     c.check.interps.foreach { interp =>
       interp
         .loadIvy(
-          Dependency.of("me.shadaj", s"scalapy-core_$sbv", "0.5.0"),
+          Dependency.of("me.shadaj", s"scalapy-core_$sbv", "0.5.0+8-7c7a6042"),
           Dependency.of("ai.kien", s"python-native-libs_$sbv", "0.2.1")
         )
         .foreach { loaded =>
@@ -106,8 +106,8 @@ object ScalaPyCompletionTests extends TestSuite{
       )) { complete =>
         complete("""v.<caret>""", Set("upper(", "lower(") -- _)
         complete("""vr.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""d.<caret>""", Set.empty[String] -- _)
-        complete("""l.<caret>""", Set.empty[String] -- _)
+        complete("""d.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""l.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
       }
 
       test("nested") - checking(Some(
@@ -129,16 +129,16 @@ object ScalaPyCompletionTests extends TestSuite{
       )) { complete =>
         complete("""Obj.v.<caret>""", Set("upper(", "lower(") -- _)
         complete("""Obj.vr.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""Obj.d.<caret>""", Set.empty[String] -- _)
-        complete("""Obj.l.<caret>""", Set.empty[String] -- _)
+        complete("""Obj.d.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""Obj.l.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
         complete("""Obj.inst.v.<caret>""", Set("upper(", "lower(") -- _)
         complete("""Obj.inst.vr.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""Obj.inst.d.<caret>""", Set.empty[String] -- _)
-        complete("""Obj.inst.l.<caret>""", Set.empty[String] -- _)
+        complete("""Obj.inst.d.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""Obj.inst.l.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
         complete("""inst.v.<caret>""", Set("upper(", "lower(") -- _)
         complete("""inst.vr.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""inst.d.<caret>""", Set.empty[String] -- _)
-        complete("""inst.l.<caret>""", Set.empty[String] -- _)
+        complete("""inst.d.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""inst.l.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
       }
 
       test("nestedpython") - checking(Some(
@@ -161,16 +161,16 @@ object ScalaPyCompletionTests extends TestSuite{
       )) { complete =>
         complete("""Obj.v.x.<caret>""", Set("upper(", "lower(") -- _)
         complete("""Obj.vr.x.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""Obj.d.x.<caret>""", Set.empty[String] -- _)
-        complete("""Obj.l.x.<caret>""", Set.empty[String] -- _)
+        complete("""Obj.d.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""Obj.l.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
         complete("""Obj.inst.v.x.<caret>""", Set("upper(", "lower(") -- _)
         complete("""Obj.inst.vr.x.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""Obj.inst.d.x.<caret>""", Set.empty[String] -- _)
-        complete("""Obj.inst.l.x.<caret>""", Set.empty[String] -- _)
+        complete("""Obj.inst.d.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""Obj.inst.l.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
         complete("""inst.v.x.<caret>""", Set("upper(", "lower(") -- _)
         complete("""inst.vr.x.<caret>""", Set("upper(", "lower(") -- _)
-        complete("""inst.d.x.<caret>""", Set.empty[String] -- _)
-        complete("""inst.l.x.<caret>""", Set.empty[String] -- _)
+        complete("""inst.d.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
+        complete("""inst.l.x.<caret>""", s => if (s.isEmpty) Set.empty else Set(""))
       }
     }
   } else Tests()
