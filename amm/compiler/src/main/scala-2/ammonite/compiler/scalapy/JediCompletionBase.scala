@@ -10,9 +10,9 @@ import scala.util.Try
 import me.shadaj.scalapy.py
 import me.shadaj.scalapy.py.PyQuote
 
-trait JediCompletion extends Completion { self =>
+trait JediCompletionBase extends Completion { self =>
   import global.{ApplyDynamic => _, _}
-  import JediCompletion._
+  import JediCompletionBase._
 
   def complete(
     tree: global.Tree,
@@ -128,7 +128,7 @@ trait JediCompletion extends Completion { self =>
   }
 }
 
-object JediCompletion {
+object JediCompletionBase {
   val jedi = Try(py.module("jedi"))
 
   def namespace = py"globals()"
@@ -186,6 +186,6 @@ object JediCompletion {
   }
 
   object PythonVariable extends utils.PythonVariable {
-    def namespace = JediCompletion.namespace
+    def namespace = JediCompletionBase.namespace
   }
 }
