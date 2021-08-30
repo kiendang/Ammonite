@@ -60,3 +60,8 @@ jobs:
       - run: ./mill -i "amm.repl[${{ matrix.scala-version }}].test" ammonite.interp.ScalaPyCompletionTests
         env:
           CI_SCALAPY_TEST: on
+      - run: pip install jedi
+      - run: ./mill -i "amm.repl[${{ matrix.scala-version }}].test" ammonite.interp.ScalaPyJediCompletionTests
+        env:
+          CI_SCALAPY_TEST: on
+          CI_SCALAPYJEDI_TEST: on
