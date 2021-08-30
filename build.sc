@@ -100,6 +100,7 @@ object Deps {
   def scalaCompiler(scalaVersion: String) = ivy"org.scala-lang:scala-compiler:${scalaVersion}"
   val scalaJava8Compat = ivy"org.scala-lang.modules::scala-java8-compat:0.9.0"
   val scalaparse = ivy"com.lihaoyi::scalaparse:$fastparseVersion"
+  val scalapy = ivy"me.shadaj::scalapy-core:0.5.0"
   def scalaReflect(scalaVersion: String) = ivy"org.scala-lang:scala-reflect:${scalaVersion}"
   val scalaXml = ivy"org.scala-lang.modules::scala-xml:2.0.0-M3"
   val scalazCore = ivy"org.scalaz::scalaz-core:7.2.27"
@@ -368,6 +369,7 @@ object amm extends Cross[MainModule](fullCrossScalaVersions:_*){
             Deps.scalaCompiler(scalaVersion()),
             Deps.scalaparse,
             Deps.scalaXml,
+            Deps.scalapy
           )
         else
           Agg[Dep](
@@ -968,4 +970,3 @@ def publishSonatype(publishArtifacts: mill.main.Tasks[PublishModule.PublishData]
         x:_*
       )
   }
-

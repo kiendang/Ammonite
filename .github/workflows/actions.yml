@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - master
+      - scalapy-completion
   pull_request:
     branches:
       - master
+      - scalapy-completion
 jobs:
   test:
     strategy:
@@ -37,3 +39,29 @@ jobs:
         with:
           java-version: ${{ matrix.java-version }}
       - run: ./mill -i integrationTest ${{ matrix.scala-version }}
+  scalapycompletiontest:
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: [8]
+        scala-version: [2.12.14, 2.13.6]
+        python-version: [3.7, 3.8, 3.9]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v1
+        with:
+          java-version: ${{ matrix.java-version }}
+      - uses: actions/setup-python@v2
+        with:
+          python: ${{ matrix.python-version }}
+      - run: ./mill -i "amm.repl[${{ matrix.scala-version }}].test" ammonite.interp.ScalaPyCompletionTests
+        env:
+          CI_SCALAPY_TEST: on
+      - run: pip install jedi
+      - run: ./mill -i "amm.repl[${{ matrix.scala-version }}].test" ammonite.interp.ScalaPyJediCompletionTests
+        env:
+          CI_SCALAPY_TEST: on
+          CI_SCALAPYJEDI_TEST: on

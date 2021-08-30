@@ -41,6 +41,7 @@ object Pressy {
    * `nsc.interactive.Global` and other data specific to a single completion
    */
   class Run(val pressy: nsc.interactive.Global,
+            evalClassloader: => ClassLoader,
             currentFile: BatchSourceFile,
             dependencyCompleteOpt: Option[String => (Int, Seq[String])],
             allCode: String,
@@ -163,7 +164,17 @@ object Pressy {
         }
     }
 
-    def prefixed: (Int, Seq[(String, Option[String])]) = tree match {
+    def prefixed: (Int, Seq[(String, Option[String])]) = {
+      new scalapy.JediCompletion {
+        val global: pressy.type = pressy
+      }.complete(tree, evalClassloader, allCode, index).orElse {
+        new scalapy.BasicCompletion {
+          val global: pressy.type = pressy
+        }.complete(tree, evalClassloader, allCode, index)
+      } match {
+        case Some(result) => result
+        case None => tree match {
+
       case t @ pressy.Select(qualifier, name) =>
 
         val dotOffset = if (qualifier.pos.point == t.pos.point) 0 else 1
@@ -249,6 +260,7 @@ object Pressy {
           comps.filter(m => !blacklisted(m.sym))
                .map { s => (memberToString(s), None) }
         )
+      }}
     }
     def ask(index: Int, query: (Position, Response[List[pressy.Member]]) => Unit) = {
       val position = new OffsetPosition(currentFile, index)
@@ -324,7 +336,9 @@ object Pressy {
       pressy.askReload(List(currentFile), r)
       r.get.fold(x => x, e => throw e)
 
-      val run = Try(new Run(pressy, currentFile, dependencyCompleteOpt, allCode, index))
+      val run = Try(
+        new Run(pressy, evalClassloader, currentFile, dependencyCompleteOpt, allCode, index)
+      )
 
       val (i, all): (Int, Seq[(String, Option[String])]) = run.map(_.prefixed) match {
         case Success(prefixed) => prefixed
@@ -341,6 +355,33 @@ object Pressy {
     def shutdownPressy() = {
       Option(cachedPressy).foreach(_.askShutdown())
       cachedPressy = null
+    }
+  }
+
+  trait ExtractTree {
+    val universe: scala.reflect.api.Universe
+    import universe._
+
+    object SelectChain {
+      def unapply(t: Tree): Option[(Tree, List[String])] = {
+        val r = t match {
+          case q"${SelectChain(q, attrs)}.${TermName(attrN)}" =>
+            Some((q, attrN.toString :: attrs))
+          case _ => Some(t, Nil)
+        }
+        r.collect { case (q, attrs) => (q, attrs.reverse) }
+      }
+    }
+
+    object SelectDynamicChain {
+      def unapply(t: Tree): Option[(Tree, List[String])] = {
+        val r = t match {
+          case q"${SelectDynamicChain(q, args)}.selectDynamic(${Literal(Constant(argN))})" =>
+            Some((q, argN.toString :: args))
+          case _ => Some(t, Nil)
+        }
+        r.collect { case (q, args) => (q, args.reverse) }
+      }
     }
   }
 }
